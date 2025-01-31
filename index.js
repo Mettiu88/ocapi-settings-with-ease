@@ -2,6 +2,9 @@ const express = require('express')
 const bodyParser = require('body-parser')
 const path = require('path')
 const request = require('request-promise-native')
+const http = require('http')
+const https = require('https')
+const fs = require('fs')
 
 const app = express()
 const port = process.env.PORT || 3000
@@ -9,7 +12,10 @@ const authURL = 'https://account.demandware.com/dw/oauth2/access_token'
 const baseURL = (host) => `https://${host}/s/-/dw/meta/v1/rest`
 const defaultClientID = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const defaultClientSecret = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-var authToken = undefined
+
+let authToken = undefined
+
+const isHttpsEnabled = process.env.HTTPS_ENABLE && process.env.HTTPS_ENABLE === 'true'
 const defaultRequestOptions = url => {
     return {
         url: url,
@@ -20,6 +26,21 @@ const defaultRequestOptions = url => {
         json: true
     }
 }
+
+/* If TLS is enabled ensure the app is server over HTTPS */
+if (isHttpsEnabled) {
+    app.use(function(req, res, next) {
+        if(!req.secure) {
+            const secureUrl = "https://" + req.headers['host'] + req.url
+
+            res.writeHead(301, { "Location": secureUrl })
+            res.end()
+        }
+
+        next()
+    })
+}
+
 
 app.set('views', path.join(__dirname, 'views'))
 app.set('view engine', 'ejs')
@@ -48,7 +69,24 @@ app.post('/apis', (req, res) => {
     })
 })
 
-app.listen(port, () => console.log(`App started & now listening`))
+/* Check if we should start HTTPS server */
+if (isHttpsEnabled &&
+    process.env.HTTPS_KEY &&
+    process.env.HTTPS_CERT &&
+    process.env.HTTPS_CA) {
+    const credentials = {
+        key: fs.readFileSync(process.env.HTTPS_KEY),
+        cert: fs.readFileSync(process.env.HTTPS_CERT),
+        ca: fs.readFileSync(process.env.HTTPS_CA)
+    }
+    const httpsServer = https.createServer(credentials, app)
+
+    httpsServer.listen(process.env.HTTPS_PORT, () => {
+        console.log('HTTPS Server running on port ', process.env.HTTPS_PORT)
+    })
+} else {
+    app.listen(port, () => console.log(`App started & now listening`))
+}
 
 function fetchEndpoints(host, clientId, clientSecret, apiName, apiVersion) {
     const client_id = clientId || defaultClientID
